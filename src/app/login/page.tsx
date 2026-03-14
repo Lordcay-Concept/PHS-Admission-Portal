@@ -31,51 +31,69 @@ export default function LoginPage() {
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
 
-    const { data: { user }, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (authError) {
-      console.error("Auth Error:", authError.message);
-      toast.error(authError.message);
+      if (authError) {
+        console.error("Auth Error:", authError.message);
+        toast.error(authError.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!user) {
+        toast.error("Login failed - no user returned");
+        setLoading(false);
+        return;
+      }
+
+      console.log("Auth successful, fetching profile for UID:", user.id);
+      
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role, is_approved")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError) {
+        console.error("Database Error Detail:", profileError);
+        toast.error(`Profile error: ${profileError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      if (!profile) {
+        console.error("No profile row found for this ID");
+        toast.error("Profile not found in database.");
+        setLoading(false);
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const redirectTo = params.get('redirect');
+
+      setTimeout(() => {
+        if (profile.role === "admin") {
+          toast.success("Welcome back, Admin");
+          router.push(redirectTo || "/admin/dashboard");
+        } else if (profile.is_approved) {
+          toast.success("Welcome, Staff Member");
+          router.push(redirectTo || "/portal/staff");
+        } else {
+          toast.error("Account pending approval.");
+          supabase.auth.signOut();
+        }
+      }, 100);
+      
+    } catch (error: any) {
+      console.error("Login error:", error);
+      toast.error(error.message || "An unexpected error occurred");
+    } finally {
       setLoading(false);
-      return;
     }
-
-    console.log("Auth successful, fetching profile for UID:", user?.id);
-    
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("role, is_approved")
-      .eq("id", user?.id)
-      .single();
-
-    if (profileError) {
-      console.error("Database Error Detail:", profileError);
-      toast.error(`Database Error: ${profileError.message}`);
-      setLoading(false);
-      return;
-    }
-
-    if (!profile) {
-      console.error("No profile row found for this ID");
-      toast.error("Profile not found in database.");
-      setLoading(false);
-      return;
-    }
-
-    if (profile.role === "admin") {
-      toast.success("Welcome back, Admin");
-      router.push("/admin/dashboard");
-    } else if (profile.is_approved) {
-      toast.success("Welcome, Staff Member");
-      router.push("/portal/staff");
-    } else {
-      toast.error("Account pending approval.");
-      await supabase.auth.signOut();
-    }
-    setLoading(false);
   }
 
   async function handlePasswordReset() {
