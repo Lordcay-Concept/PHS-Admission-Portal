@@ -172,7 +172,7 @@ export default function StaffPortal() {
             </div>
           </div>
           <Link href="/portal/staff/schedule">
-            <Button className="bg-slate-900 text-white rounded-xl font-bold px-6">View Schedule</Button>
+            <Button className="bg-slate-900 text-white hover:bg-red-900 rounded-xl font-bold px-6">View Schedule</Button>
           </Link>
         </div>
       </div>

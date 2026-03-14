@@ -24,47 +24,99 @@ const [logo, setLogo] = useState<string | null>("/images/logo/PHS Logo.webp");
   };
 
   const fetchTranscript = async () => {
-    if (!searchQuery) return toast.error("Enter a Student ID or Name");
-    setLoading(true);
+  if (!searchQuery) return toast.error("Enter a Student ID or Name");
+  setLoading(true);
 
-    try {
-      const { data: student, error: sErr } = await supabase
-        .from("students")
-        .select("*")
-        .or(`full_name.ilike.%${searchQuery}%,admission_no.eq.${searchQuery}`)
-        .single();
-
-      if (sErr || !student) throw new Error("Student not found");
-
-      const { data: results, error: rErr } = await supabase
-        .from("results")
-        .select("*")
-        .eq("student_id", student.id)
-        .eq("is_approved", true)
-        .order("session", { ascending: true });
-
-      if (rErr) throw rErr;
-
-      const grouped = results.reduce((acc: any, item: any) => {
-        const key = `${item.class} (${item.session})`;
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(item);
-        return acc;
-      }, {});
-
-      const allScores = results.map(r => r.total || 0);
-      const cumulativeAverage = allScores.length > 0 
-        ? (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) 
-        : "0.00";
-
-      setTranscriptData({ student, grouped, cumulativeAverage, totalSubjects: allScores.length });
-      toast.success("Academic records retrieved.");
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
+  try {
+    let student = null;
+    
+    // First try to search by admission number (exact match)
+    const { data: studentByAdmission, error: admissionError } = await supabase
+      .from("students")
+      .select("*")
+      .eq("admission_number", searchQuery.trim())
+      .maybeSingle();
+      
+    if (studentByAdmission) {
+      student = studentByAdmission;
+    } else {
+      // If not found by admission number, search by name (split the search query)
+      const searchTerms = searchQuery.trim().split(' ');
+      
+      if (searchTerms.length === 1) {
+        // Single term - search in first_name OR surname
+        const { data: studentByName, error: nameError } = await supabase
+          .from("students")
+          .select("*")
+          .or(`first_name.ilike.%${searchTerms[0]}%,surname.ilike.%${searchTerms[0]}%`)
+          .maybeSingle();
+          
+        if (studentByName) student = studentByName;
+      } else if (searchTerms.length >= 2) {
+        // Two terms - search for first_name and surname combination
+        const { data: studentByName, error: nameError } = await supabase
+          .from("students")
+          .select("*")
+          .ilike('first_name', `%${searchTerms[0]}%`)
+          .ilike('surname', `%${searchTerms.slice(1).join(' ')}%`)
+          .maybeSingle();
+          
+        if (studentByName) student = studentByName;
+      }
     }
-  };
+
+    if (!student) throw new Error("Student not found");
+
+    console.log("Found student:", student); // Debug log
+
+    const { data: results, error: rErr } = await supabase
+      .from("results")
+      .select("*")
+      .eq("student_id", student.admission_number) // Use admission_number as student_id
+      .eq("is_approved", true)
+      .order("session", { ascending: true });
+
+    if (rErr) throw rErr;
+
+    if (!results || results.length === 0) {
+      toast.info("No approved results found for this student");
+    }
+
+    // Group results by class and session
+    const grouped = results.reduce((acc: any, item: any) => {
+      const key = `${item.class} (${item.session})`;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item);
+      return acc;
+    }, {});
+
+    const allScores = results.map(r => r.total || 0);
+    const cumulativeAverage = allScores.length > 0 
+      ? (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(2) 
+      : "0.00";
+
+    // Create full_name for display
+    const full_name = `${student.first_name || ''} ${student.surname || ''}`.trim();
+
+    setTranscriptData({ 
+      student: { 
+        ...student, 
+        full_name,
+        admission_no: student.admission_number 
+      }, 
+      grouped, 
+      cumulativeAverage, 
+      totalSubjects: allScores.length 
+    });
+    
+    toast.success("Academic records retrieved.");
+  } catch (err: any) {
+    console.error("Transcript error:", err);
+    toast.error(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="p-6 max-w-5xl mx-auto min-h-screen bg-slate-50 relative">
@@ -125,12 +177,11 @@ const [logo, setLogo] = useState<string | null>("/images/logo/PHS Logo.webp");
           <div className="grid grid-cols-2 gap-8 mb-10 text-sm border-b pb-8 border-slate-100">
             <div>
               <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Student Particulars</p>
-              <p className="text-xl font-black text-slate-900 uppercase">{transcriptData.student.full_name}</p>
-              <p className="text-slate-500 font-medium">Gender: {transcriptData.student.gender || "N/A"}</p>
+              <p className="text-xl font-black text-slate-900 uppercase">{transcriptData.student.first_name} {transcriptData.student.surname}</p>              <p className="text-slate-500 font-medium">Gender: {transcriptData.student.gender || "N/A"}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Registration Details</p>
-              <p className="text-xl font-black text-slate-900">{transcriptData.student.admission_no || "N/A"}</p>
+              <p className="text-xl font-black text-slate-900">{transcriptData.student.admission_number || "N/A"}</p>
               <p className="text-slate-500 font-medium italic underline decoration-red-900">Transcript No: #PHS-{Math.floor(1000 + Math.random() * 9000)}</p>
             </div>
           </div>
